@@ -5,10 +5,11 @@ import pickle
 import os
 
 root_dir = os.path.dirname(os.path.abspath(__file__)) + '/'
-pkl_filepath = root_dir + 'fwd.data'
-log_filepath = root_dir + 'can1.log'
+fwd_data_filepath = root_dir + 'fwd.data'
+can0_log_filepath = root_dir + 'can0.log'
+can1_log_filepath = root_dir + 'can1.log'
 
-adp_data_dict = pickle.load(open(pkl_filepath, 'rb'))
+adp_data_dict = pickle.load(open(fwd_data_filepath, 'rb'))
 
 can0 = can.interface.Bus(channel = 'can0', bustype = 'socketcan')
 can1 = can.interface.Bus(channel = 'can1', bustype = 'socketcan')
@@ -18,17 +19,20 @@ can1_queue = queue.Queue()
 
 def process_can0():
     while True:
-        msg = can0.recv(0.1)
-        if msg is None:
-            continue
+        with open(can0_log_filepath, 'wb') as log_file:
+            msg = can0.recv(0.1)
+            if msg is not None:
+                can0_queue.put(msg)
+                
+                log_file.write(f"<< {msg}\n")
+                log_file.flush()
 
-        can0_queue.put(msg)
+            fwd = can1_queue.get()
+            if fwd is not None:
+                can0.send(fwd)
 
-        fwd = can1_queue.get()
-        if fwd is None:
-            continue
-
-        can0.send(fwd)
+                log_file.write(f">> {fwd}\n")
+                log_file.flush()
 
 def process_can1():
     while True:
@@ -54,17 +58,18 @@ def process_can1():
                     check=False
                     )
 
-        can1.send(msg)
-        
-        ack = can1.recv(0.1)
-        if ack is None:
-            continue
+        with open(can1_log_filepath, 'wb') as log_file:
+            can1.send(msg)
 
-        can1_queue.put(ack)
-        
-        with open(log_filepath, 'wb') as log_file:
-            log_file.write(f"{ack}\n")
+            log_file.write(f">> {msg}\n")
             log_file.flush()
+        
+            ack = can1.recv(0.1)
+            if ack is not None:
+                can1_queue.put(ack)
+
+                log_file.write(f"<< {ack}\n")
+                log_file.flush()
 
 can0_thread = threading.Thread(target=process_can0)
 can0_thread.start()
